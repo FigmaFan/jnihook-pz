@@ -272,6 +272,43 @@ ClassFile::load(const uint8_t *classfile_bytes)
 
                                 break;
                         }
+                case CONSTANT_Dynamic:
+                        {
+                                CONSTANT_Dynamic_info ci;
+
+                                ci.tag = tag;
+                                cf_read_be(&ci.bootstrap_method_attr_index, raw, index);
+                                cf_read_be(&ci.name_and_type_index, raw, index);
+
+                                cpi.bytes.resize(sizeof(ci));
+                                memcpy(cpi.bytes.data(), &ci, sizeof(ci));
+
+                                break;
+                        }
+                case CONSTANT_Module:
+                        {
+                                CONSTANT_Module_info ci;
+
+                                ci.tag = tag;
+                                cf_read_be(&ci.name_index, raw, index);
+
+                                cpi.bytes.resize(sizeof(ci));
+                                memcpy(cpi.bytes.data(), &ci, sizeof(ci));
+
+                                break;
+                        }
+                case CONSTANT_Package:
+                        {
+                                CONSTANT_Package_info ci;
+
+                                ci.tag = tag;
+                                cf_read_be(&ci.name_index, raw, index);
+
+                                cpi.bytes.resize(sizeof(ci));
+                                memcpy(cpi.bytes.data(), &ci, sizeof(ci));
+
+                                break;
+                        }
                 default:
                         return nullptr;
                 }
@@ -526,6 +563,31 @@ ClassFile::bytes()
 
                                 cf_push_be(bytes, &ci->bootstrap_method_attr_index);
                                 cf_push_be(bytes, &ci->name_and_type_index);
+
+                                break;
+                        }
+                case CONSTANT_Dynamic:
+                        {
+                                auto ci = reinterpret_cast<CONSTANT_Dynamic_info *>(cpi.bytes.data());
+
+                                cf_push_be(bytes, &ci->bootstrap_method_attr_index);
+                                cf_push_be(bytes, &ci->name_and_type_index);
+
+                                break;
+                        }
+                case CONSTANT_Module:
+                        {
+                                auto ci = reinterpret_cast<CONSTANT_Module_info *>(cpi.bytes.data());
+
+                                cf_push_be(bytes, &ci->name_index);
+
+                                break;
+                        }
+                case CONSTANT_Package:
+                        {
+                                auto ci = reinterpret_cast<CONSTANT_Package_info *>(cpi.bytes.data());
+
+                                cf_push_be(bytes, &ci->name_index);
 
                                 break;
                         }
