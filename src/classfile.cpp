@@ -1,5 +1,6 @@
 #include "classfile.hpp"
 #include <cstring>
+#include <cstdio>
 
 template <typename T>
 void cf_read(T *dest, uint8_t *raw, size_t &index)
@@ -310,7 +311,30 @@ ClassFile::load(const uint8_t *classfile_bytes)
                                 break;
                         }
                 default:
-                        return nullptr;
+                        {
+                                // Unknown tag: read length and skip its bytes to remain
+                                // forward-compatible with newer classfile versions
+                                u2 length;
+
+                                // Attempt to read a length-prefixed byte sequence. This may
+                                // not be correct for every future tag, but ensures the parser
+                                // continues instead of aborting.
+                                cf_read_be(&length, raw, index);
+
+                                // Store the tag, the raw length, and its payload
+                                cpi.bytes.clear();
+                                cpi.bytes.push_back(tag);
+                                cf_push_be(cpi.bytes, &length);
+                                size_t offset = cpi.bytes.size();
+                                cpi.bytes.resize(offset + length);
+                                cf_read(cpi.bytes.data() + offset, raw, index, length);
+
+                                std::fprintf(stderr,
+                                             "[WARN] Unknown constant pool tag %u, skipped %u bytes\n",
+                                             tag, length);
+
+                                break;
+                        }
                 }
 
                 constant_pool.push_back(cpi);
