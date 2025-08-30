@@ -432,18 +432,23 @@ JNIHook_Attach(jmethodID method, void *native_hook_method, jmethodID *original_m
 
                         std::string clazz_desc = std::string("L") + clazz_name + ";";
                         std::string clazz_copy_desc = std::string("L") + class_copy_name + ";";
-                        if (auto index = descriptor.find(clazz_desc); index != descriptor.npos) {
-                                // Overwrite constant pool item
+
+                        bool replaced = false;
+                        for (size_t index; (index = descriptor.find(clazz_desc)) != descriptor.npos;) {
+                                descriptor.replace(index, clazz_desc.size(), clazz_copy_desc);
+                                replaced = true;
+                        }
+
+                        if (replaced) {
                                 CONSTANT_Utf8_info ci;
                                 cp_info cpi;
-                                std::string new_descriptor = descriptor.replace(index, clazz_desc.size(), clazz_copy_desc);
 
                                 ci.tag = CONSTANT_Utf8;
-                                ci.length = static_cast<u2>(new_descriptor.size());
+                                ci.length = static_cast<u2>(descriptor.size());
 
                                 cpi.bytes = std::vector<uint8_t>(sizeof(ci) + ci.length);
                                 memcpy(cpi.bytes.data(), &ci, sizeof(ci));
-                                memcpy(&cpi.bytes.data()[sizeof(ci)], new_descriptor.c_str(), ci.length);
+                                memcpy(&cpi.bytes.data()[sizeof(ci)], descriptor.c_str(), ci.length);
 
                                 cf.set_constant_pool_item(nt_ci->descriptor_index, cpi);
                         }
