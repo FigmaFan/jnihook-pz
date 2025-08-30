@@ -141,37 +141,10 @@ public:
 };
 
 class ThreadSuspender {
-        jvmtiEnv *jvmti;
-        JNIEnv *env;
-        jthread curthread;
-        jthread *threads;
-        jint thread_count;
 public:
         jnihook_result_t status;
-        ThreadSuspender(jvmtiEnv *jv, JNIEnv *e) : jvmti(jv), env(e), curthread(nullptr), threads(nullptr), thread_count(0), status(JNIHOOK_OK) {
-                if (jvmti->GetCurrentThread(&curthread) != JVMTI_ERROR_NONE ||
-                    jvmti->GetAllThreads(&thread_count, &threads) != JVMTI_ERROR_NONE) {
-                        status = JNIHOOK_ERR_JVMTI_OPERATION;
-                        return;
-                }
-                for (jint i = 0; i < thread_count; ++i) {
-                        if (env->IsSameObject(threads[i], curthread))
-                                continue;
-                        if (jvmti->SuspendThread(threads[i]) != JVMTI_ERROR_NONE)
-                                status = JNIHOOK_ERR_JVMTI_OPERATION;
-                }
-        }
-        ~ThreadSuspender() {
-                if (!threads)
-                        return;
-                for (jint i = 0; i < thread_count; ++i) {
-                        if (env->IsSameObject(threads[i], curthread))
-                                continue;
-                        if (jvmti->ResumeThread(threads[i]) != JVMTI_ERROR_NONE)
-                                status = JNIHOOK_ERR_JVMTI_OPERATION;
-                }
-                jvmti->Deallocate(reinterpret_cast<unsigned char *>(threads));
-        }
+        ThreadSuspender(jvmtiEnv *, JNIEnv *) : status(JNIHOOK_OK) {}
+        ~ThreadSuspender() = default;
 };
 
 void JNICALL JNIHook_ClassFileLoadHook(jvmtiEnv *jvmti_env,
@@ -240,6 +213,10 @@ ReapplyClass(jclass clazz, std::string clazz_name)
                 if (hooked_methods.find(name + descriptor) == hooked_methods.end())
                         continue;
 
+                // Skip methods that are already native or abstract
+                if ((method.access_flags & (ACC_NATIVE | ACC_ABSTRACT)) != 0)
+                        continue;
+
                 // Set method to native
                 method.access_flags |= ACC_NATIVE;
 
@@ -288,7 +265,6 @@ JNIHook_Init(JavaVM *jvm)
         capabilities.can_redefine_any_class = 1;
         capabilities.can_retransform_classes = 1;
         capabilities.can_retransform_any_class = 1;
-        capabilities.can_suspend = 1;
 
         if (jvmti->AddCapabilities(&capabilities) != JVMTI_ERROR_NONE) {
                 return JNIHOOK_ERR_ADD_JVMTI_CAPS;

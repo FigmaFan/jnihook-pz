@@ -50,7 +50,10 @@ enum {
         CONSTANT_Utf8 = 1,
         CONSTANT_MethodHandle = 15,
         CONSTANT_MethodType = 16,
+        CONSTANT_Dynamic = 17,
         CONSTANT_InvokeDynamic = 18,
+        CONSTANT_Module = 19,
+        CONSTANT_Package = 20,
 };
 
 /* access flags */
@@ -69,7 +72,9 @@ enum {
         ACC_STRICT     = 0x0800,
         ACC_SYNTHETIC  = 0x1000,
         ACC_ANNOTATION = 0x2000,
-        ACC_ENUM       = 0x4000
+        ACC_ENUM       = 0x4000,
+        ACC_MODULE     = 0x8000,
+        ACC_RECORD     = 0x10000
 };
 
 /********************************/
@@ -153,6 +158,22 @@ typedef struct {
     u2 bootstrap_method_attr_index;
     u2 name_and_type_index;
 } CONSTANT_InvokeDynamic_info;
+
+typedef struct {
+    u1 tag;
+    u2 bootstrap_method_attr_index;
+    u2 name_and_type_index;
+} CONSTANT_Dynamic_info;
+
+typedef struct {
+    u1 tag;
+    u2 name_index;
+} CONSTANT_Module_info;
+
+typedef struct {
+    u1 tag;
+    u2 name_index;
+} CONSTANT_Package_info;
 
 /********************************/
 
@@ -325,6 +346,25 @@ public:
                                         auto info = reinterpret_cast<CONSTANT_InvokeDynamic_info *>(cpi.bytes.data());
                                         ss << "\t\t\t_bootstrap_method_attr_index: " << info->bootstrap_method_attr_index << std::endl;
                                         ss << "\t\t\t_name_and_type_index: " << info->name_and_type_index << std::endl;
+                                        break;
+                                }
+                        case CONSTANT_Dynamic:
+                                {
+                                        auto info = reinterpret_cast<CONSTANT_Dynamic_info *>(cpi.bytes.data());
+                                        ss << "\t\t\t_bootstrap_method_attr_index: " << info->bootstrap_method_attr_index << std::endl;
+                                        ss << "\t\t\t_name_and_type_index: " << info->name_and_type_index << std::endl;
+                                        break;
+                                }
+                        case CONSTANT_Module:
+                                {
+                                        auto info = reinterpret_cast<CONSTANT_Module_info *>(cpi.bytes.data());
+                                        ss << "\t\t\t_name_index: " << info->name_index << std::endl;
+                                        break;
+                                }
+                        case CONSTANT_Package:
+                                {
+                                        auto info = reinterpret_cast<CONSTANT_Package_info *>(cpi.bytes.data());
+                                        ss << "\t\t\t_name_index: " << info->name_index << std::endl;
                                         break;
                                 }
                         }
