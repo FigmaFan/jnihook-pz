@@ -501,6 +501,136 @@ JNIHook_Attach(jmethodID method, void *native_hook_method, jmethodID *original_m
                         }
                 }
 
+                // Patch class-level attributes that may reference the class name
+                for (auto &attr : cf.get_attributes()) {
+                        auto attr_name_ci = reinterpret_cast<CONSTANT_Utf8_info *>(
+                                cf.get_constant_pool_item(attr.attribute_name_index).bytes.data()
+                        );
+                        auto attr_name = std::string(attr_name_ci->bytes, &attr_name_ci->bytes[attr_name_ci->length]);
+
+                        if (attr_name == "Signature") {
+                                u2 sig_index = *reinterpret_cast<u2 *>(attr.info.data());
+                                auto sig_ci = reinterpret_cast<CONSTANT_Utf8_info *>(
+                                        cf.get_constant_pool_item_be(sig_index).bytes.data()
+                                );
+                                auto sig = std::string(sig_ci->bytes, &sig_ci->bytes[sig_ci->length]);
+
+                                std::string clazz_desc = std::string("L") + clazz_name + ";";
+                                std::string clazz_copy_desc = std::string("L") + class_copy_name + ";";
+
+                                for (size_t index; (index = sig.find(clazz_desc)) != sig.npos;) {
+                                        CONSTANT_Utf8_info ci;
+                                        cp_info cpi;
+                                        std::string new_sig = sig.replace(index, clazz_desc.size(), clazz_copy_desc);
+
+                                        ci.tag = CONSTANT_Utf8;
+                                        ci.length = static_cast<u2>(new_sig.size());
+
+                                        cpi.bytes = std::vector<uint8_t>(sizeof(ci) + ci.length);
+                                        memcpy(cpi.bytes.data(), &ci, sizeof(ci));
+                                        memcpy(&cpi.bytes.data()[sizeof(ci)], new_sig.c_str(), ci.length);
+
+                                        cf.set_constant_pool_item_be(sig_index, cpi);
+                                        sig = new_sig;
+                                }
+                        } else if (attr_name == "InnerClasses") {
+                                size_t info_index = 0;
+                                u2 number_of_classes = (attr.info[info_index] << 8) | attr.info[info_index + 1];
+                                info_index += 2;
+
+                                for (u2 i = 0; i < number_of_classes; ++i) {
+                                        u2 inner_index = *reinterpret_cast<u2 *>(&attr.info[info_index]);
+                                        info_index += 2;
+                                        u2 outer_index = *reinterpret_cast<u2 *>(&attr.info[info_index]);
+                                        info_index += 2;
+                                        info_index += 4; // skip inner_name_index and access flags
+
+                                        auto patch_class = [&](u2 class_index) {
+                                                if (class_index == 0)
+                                                        return;
+                                                auto class_ci = reinterpret_cast<CONSTANT_Class_info *>(
+                                                        cf.get_constant_pool_item_be(class_index).bytes.data()
+                                                );
+                                                auto name_ci = reinterpret_cast<CONSTANT_Utf8_info *>(
+                                                        cf.get_constant_pool_item(class_ci->name_index).bytes.data()
+                                                );
+                                                auto name = std::string(name_ci->bytes, &name_ci->bytes[name_ci->length]);
+
+                                                if (name == clazz_name || name.rfind(clazz_name + "$", 0) == 0) {
+                                                        std::string new_name = name.replace(0, clazz_name.size(), class_copy_name);
+
+                                                        CONSTANT_Utf8_info ci;
+                                                        cp_info cpi;
+                                                        ci.tag = CONSTANT_Utf8;
+                                                        ci.length = static_cast<u2>(new_name.size());
+
+                                                        cpi.bytes = std::vector<uint8_t>(sizeof(ci) + ci.length);
+                                                        memcpy(cpi.bytes.data(), &ci, sizeof(ci));
+                                                        memcpy(&cpi.bytes.data()[sizeof(ci)], new_name.c_str(), ci.length);
+
+                                                        cf.set_constant_pool_item(class_ci->name_index, cpi);
+                                                }
+                                        };
+
+                                        patch_class(inner_index);
+                                        patch_class(outer_index);
+                                }
+                        } else if (attr_name == "EnclosingMethod") {
+                                u2 class_index = *reinterpret_cast<u2 *>(attr.info.data());
+                                u2 method_index = *reinterpret_cast<u2 *>(&attr.info[2]);
+
+                                auto class_ci = reinterpret_cast<CONSTANT_Class_info *>(
+                                        cf.get_constant_pool_item_be(class_index).bytes.data()
+                                );
+                                auto name_ci = reinterpret_cast<CONSTANT_Utf8_info *>(
+                                        cf.get_constant_pool_item(class_ci->name_index).bytes.data()
+                                );
+                                auto class_name = std::string(name_ci->bytes, &name_ci->bytes[name_ci->length]);
+
+                                if (class_name == clazz_name || class_name.rfind(clazz_name + "$", 0) == 0) {
+                                        std::string new_name = class_name.replace(0, clazz_name.size(), class_copy_name);
+
+                                        CONSTANT_Utf8_info ci;
+                                        cp_info cpi;
+                                        ci.tag = CONSTANT_Utf8;
+                                        ci.length = static_cast<u2>(new_name.size());
+
+                                        cpi.bytes = std::vector<uint8_t>(sizeof(ci) + ci.length);
+                                        memcpy(cpi.bytes.data(), &ci, sizeof(ci));
+                                        memcpy(&cpi.bytes.data()[sizeof(ci)], new_name.c_str(), ci.length);
+
+                                        cf.set_constant_pool_item(class_ci->name_index, cpi);
+                                }
+
+                                auto nt_ci = reinterpret_cast<CONSTANT_NameAndType_info *>(
+                                        cf.get_constant_pool_item_be(method_index).bytes.data()
+                                );
+                                auto descriptor_ci = reinterpret_cast<CONSTANT_Utf8_info *>(
+                                        cf.get_constant_pool_item(nt_ci->descriptor_index).bytes.data()
+                                );
+                                auto descriptor = std::string(descriptor_ci->bytes, &descriptor_ci->bytes[descriptor_ci->length]);
+
+                                std::string clazz_desc = std::string("L") + clazz_name + ";";
+                                std::string clazz_copy_desc = std::string("L") + class_copy_name + ";";
+
+                                for (size_t index; (index = descriptor.find(clazz_desc)) != descriptor.npos;) {
+                                        CONSTANT_Utf8_info ci;
+                                        cp_info cpi;
+                                        std::string new_descriptor = descriptor.replace(index, clazz_desc.size(), clazz_copy_desc);
+
+                                        ci.tag = CONSTANT_Utf8;
+                                        ci.length = static_cast<u2>(new_descriptor.size());
+
+                                        cpi.bytes = std::vector<uint8_t>(sizeof(ci) + ci.length);
+                                        memcpy(cpi.bytes.data(), &ci, sizeof(ci));
+                                        memcpy(&cpi.bytes.data()[sizeof(ci)], new_descriptor.c_str(), ci.length);
+
+                                        cf.set_constant_pool_item(nt_ci->descriptor_index, cpi);
+                                        descriptor = new_descriptor;
+                                }
+                        }
+                }
+
                 auto class_data = cf.bytes();
 
                 if (g_jnihook->jvmti->GetClassLoader(clazz, &class_loader) != JVMTI_ERROR_NONE)
