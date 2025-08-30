@@ -22,10 +22,12 @@
 
 #include <jnihook.h>
 #include <unordered_map>
+#include <unordered_set>
 #include <string>
 #include <vector>
 #include <cstdint>
 #include <cstring>
+#include <algorithm>
 #include "classfile.hpp"
 #include "uuid.hpp"
 
@@ -70,31 +72,41 @@ static std::string
 get_class_name(JNIEnv *env, jclass clazz)
 {
         jclass klass = env->FindClass("java/lang/Class");
-        if (!klass)
+        if (env->ExceptionCheck() || !klass) {
+                env->ExceptionClear();
                 return "";
+        }
 
         jmethodID getName_method = env->GetMethodID(klass, "getName", "()Ljava/lang/String;");
-        if (!getName_method)
+        if (env->ExceptionCheck() || !getName_method) {
+                env->ExceptionClear();
+                env->DeleteLocalRef(klass);
                 return "";
+        }
 
         jstring name_obj = reinterpret_cast<jstring>(env->CallObjectMethod(clazz, getName_method));
-        if (!name_obj)
+        if (env->ExceptionCheck() || !name_obj) {
+                env->ExceptionClear();
+                env->DeleteLocalRef(klass);
                 return "";
+        }
 
         const char *c_name = env->GetStringUTFChars(name_obj, 0);
-        if (!c_name)
+        if (env->ExceptionCheck() || !c_name) {
+                env->ExceptionClear();
+                env->DeleteLocalRef(name_obj);
+                env->DeleteLocalRef(klass);
                 return "";
+        }
 
-        std::string name = std::string(c_name, &c_name[strlen(c_name)]);
+        std::string name(c_name, &c_name[strlen(c_name)]);
 
         env->ReleaseStringUTFChars(name_obj, c_name);
+        env->DeleteLocalRef(name_obj);
+        env->DeleteLocalRef(klass);
 
-        // Replace dots with slashes to match contents of ClassFile
-        for (size_t i = 0; i < name.length(); ++i) {
-                if (name[i] == '.')
-                        name[i] = '/';
-        }
-        
+        std::replace(name.begin(), name.end(), '.', '/');
+
         return name;
 }
 
@@ -119,6 +131,48 @@ get_method_info(jvmtiEnv *jvmti, jmethodID method)
 
         return std::make_unique<method_info_t>(method_info_t { name_str, signature_str, access_flags });
 }
+
+class LocalFrameGuard {
+        JNIEnv *env;
+public:
+        jint status;
+        LocalFrameGuard(JNIEnv *e, jint capacity) : env(e) { status = env->PushLocalFrame(capacity); }
+        ~LocalFrameGuard() { if (status >= 0) env->PopLocalFrame(NULL); }
+};
+
+class ThreadSuspender {
+        jvmtiEnv *jvmti;
+        JNIEnv *env;
+        jthread curthread;
+        jthread *threads;
+        jint thread_count;
+public:
+        jnihook_result_t status;
+        ThreadSuspender(jvmtiEnv *jv, JNIEnv *e) : jvmti(jv), env(e), curthread(nullptr), threads(nullptr), thread_count(0), status(JNIHOOK_OK) {
+                if (jvmti->GetCurrentThread(&curthread) != JVMTI_ERROR_NONE ||
+                    jvmti->GetAllThreads(&thread_count, &threads) != JVMTI_ERROR_NONE) {
+                        status = JNIHOOK_ERR_JVMTI_OPERATION;
+                        return;
+                }
+                for (jint i = 0; i < thread_count; ++i) {
+                        if (env->IsSameObject(threads[i], curthread))
+                                continue;
+                        if (jvmti->SuspendThread(threads[i]) != JVMTI_ERROR_NONE)
+                                status = JNIHOOK_ERR_JVMTI_OPERATION;
+                }
+        }
+        ~ThreadSuspender() {
+                if (!threads)
+                        return;
+                for (jint i = 0; i < thread_count; ++i) {
+                        if (env->IsSameObject(threads[i], curthread))
+                                continue;
+                        if (jvmti->ResumeThread(threads[i]) != JVMTI_ERROR_NONE)
+                                status = JNIHOOK_ERR_JVMTI_OPERATION;
+                }
+                jvmti->Deallocate(reinterpret_cast<unsigned char *>(threads));
+        }
+};
 
 void JNICALL JNIHook_ClassFileLoadHook(jvmtiEnv *jvmti_env,
                                        JNIEnv* jni_env,
@@ -158,7 +212,13 @@ ReapplyClass(jclass clazz, std::string clazz_name)
 
         auto cf = *g_class_file_cache[clazz_name];
 
-        auto constant_pool = cf.get_constant_pool();
+        // Build lookup table for hooked methods
+        std::unordered_set<std::string> hooked_methods;
+        hooked_methods.reserve(g_hooks[clazz_name].size());
+        for (auto &hk_info : g_hooks[clazz_name]) {
+                auto &minfo = hk_info.method_info;
+                hooked_methods.insert(minfo.name + minfo.signature);
+        }
 
         // Patch class file
         // NOTE: The `methods` attribute only has the methods defined by the main class of this ClassFile
@@ -177,16 +237,7 @@ ReapplyClass(jclass clazz, std::string clazz_name)
                 auto descriptor = std::string(descriptor_ci->bytes, &descriptor_ci->bytes[descriptor_ci->length]);
 
                 // Check if the current method is a method that should be hooked
-                // TODO: Use hashmap for faster lookup
-                bool should_hook = false;
-                for (auto &hk_info : g_hooks[clazz_name]) {
-                        auto &minfo = hk_info.method_info;
-                        if (minfo.name == name && minfo.signature == descriptor) {
-                                should_hook = true;
-                                break;
-                        }
-                }
-                if (!should_hook)
+                if (hooked_methods.find(name + descriptor) == hooked_methods.end())
                         continue;
 
                 // Set method to native
@@ -497,33 +548,20 @@ JNIHook_Attach(jmethodID method, void *native_hook_method, jmethodID *original_m
                 *original_method = orig;
         }
 
-        // Suspend other threads while the hook is being set up
-        jthread curthread;
-        jthread *threads;
-        jint thread_count;
+        LocalFrameGuard frame_guard(env, 16);
+        if (frame_guard.status < 0)
+                return JNIHOOK_ERR_JNI_OPERATION;
 
-        env->PushLocalFrame(16);
-        
-        if (g_jnihook->jvmti->GetCurrentThread(&curthread) != JVMTI_ERROR_NONE)
-                return JNIHOOK_ERR_JVMTI_OPERATION;
-
-        if (g_jnihook->jvmti->GetAllThreads(&thread_count, &threads) != JVMTI_ERROR_NONE)
-                return JNIHOOK_ERR_JVMTI_OPERATION;
-
-        // TODO: Only suspend/resume threads that are actually active
-        for (jint i = 0; i < thread_count; ++i) {
-                if (env->IsSameObject(threads[i], curthread))
-                        continue;
-
-                g_jnihook->jvmti->SuspendThread(threads[i]);
-        }
+        ThreadSuspender susp(g_jnihook->jvmti, env);
+        if (susp.status != JNIHOOK_OK)
+                return susp.status;
 
         // Apply current hooks
-        jnihook_result_t ret;
         g_hooks[clazz_name].push_back(hook_info);
-        if (ret = ReapplyClass(clazz, clazz_name); ret != JNIHOOK_OK) {
+        jnihook_result_t ret;
+        if ((ret = ReapplyClass(clazz, clazz_name)) != JNIHOOK_OK) {
                 g_hooks[clazz_name].pop_back();
-                goto RESUME_THREADS;
+                return ret;
         }
 
         // Register native method for JVM lookup
@@ -535,25 +573,10 @@ JNIHook_Attach(jmethodID method, void *native_hook_method, jmethodID *original_m
         if (env->RegisterNatives(clazz, &native_method, 1) < 0) {
                 g_hooks[clazz_name].pop_back();
                 ReapplyClass(clazz, clazz_name); // Attempt to restore class to previous state
-                ret = JNIHOOK_ERR_JNI_OPERATION;
-                goto RESUME_THREADS;
+                return JNIHOOK_ERR_JNI_OPERATION;
         }
 
-        ret = JNIHOOK_OK;
-
-RESUME_THREADS:
-        // Resume other threads, hook already placed succesfully
-        for (jint i = 0; i < thread_count; ++i) {
-                if (env->IsSameObject(threads[i], curthread))
-                        continue;
-
-                g_jnihook->jvmti->ResumeThread(threads[i]);
-        }
-
-        g_jnihook->jvmti->Deallocate(reinterpret_cast<unsigned char *>(threads));
-        env->PopLocalFrame(NULL);
-
-        return ret;
+        return JNIHOOK_OK;
 }
 
 JNIHOOK_API jnihook_result_t JNIHOOK_CALL
@@ -562,8 +585,6 @@ JNIHook_Detach(jmethodID method)
         JNIEnv *env;
         jclass clazz;
         std::string clazz_name;
-        hook_info_t hook_info;
-        jvmtiClassDefinition class_definition;
 
         if (g_jnihook->jvm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_8)) {
                 return JNIHOOK_ERR_GET_JNI;
