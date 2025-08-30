@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <cstring>
 #include <algorithm>
+#include <cassert>
 #include "classfile.hpp"
 #include "uuid.hpp"
 
@@ -410,8 +411,20 @@ JNIHook_Attach(jmethodID method, void *native_hook_method, jmethodID *original_m
                                 memcpy(&cpi.bytes.data()[sizeof(ci)], class_copy_name.c_str(), ci.length);
 
                                 cf.set_constant_pool_item(class_ci->name_index, cpi);
-                                break; // TODO: Assure that the ClassName can only happen once per ClassFile!
                         }
+                }
+
+                // Verify that all class references were patched
+                for (auto &cpi : cf.get_constant_pool()) {
+                        if (cpi.bytes[0] != CONSTANT_Class)
+                                continue;
+
+                        auto class_ci = reinterpret_cast<CONSTANT_Class_info *>(cpi.bytes.data());
+                        auto name_ci = reinterpret_cast<CONSTANT_Utf8_info *>(
+                                cf.get_constant_pool_item(class_ci->name_index).bytes.data()
+                        );
+                        auto name = std::string(name_ci->bytes, &name_ci->bytes[name_ci->length]);
+                        assert(name != clazz_name && "Unpatched class name reference");
                 }
 
                 // Patch NameAndType things that instance the current class
