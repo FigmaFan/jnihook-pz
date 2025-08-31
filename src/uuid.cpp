@@ -24,8 +24,8 @@ GenerateUuid()
         rng.seed(static_cast<unsigned int>(nanos_since_epoch.count()));
 
         uuid << std::hex;
-        
-        uuid << udist(rng) << "_" << udist(rng) << "_" << nanos_since_epoch.count();
+
+        uuid << udist(rng) << "_" << udist(rng) << "_" << std::dec << nanos_since_epoch.count();
 
         // TODO: Consider hashing the whole thing
 
