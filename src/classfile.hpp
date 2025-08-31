@@ -35,6 +35,10 @@ typedef uint8_t u1;
 typedef uint16_t u2;
 typedef uint32_t u4;
 
+// Magic number that must appear at the beginning of every valid
+// Java class file. Used to quickly detect malformed inputs.
+static constexpr u4 CLASSFILE_MAGIC = 0xCAFEBABE;
+
 /* cp_info tag values */
 enum {
         CONSTANT_Class = 7,

@@ -81,6 +81,10 @@ ClassFile::load(const uint8_t *classfile_bytes)
 
         // Magic
         cf_read_be(&magic, raw, index);
+        if (magic != CLASSFILE_MAGIC) {
+                std::fprintf(stderr, "[ERROR] Invalid class file magic: 0x%08x\n", magic);
+                return nullptr;
+        }
 
         // Version
         cf_read_be(&minor, raw, index);
