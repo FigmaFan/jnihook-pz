@@ -27,6 +27,7 @@
 #include <vector>
 #include <cstdint>
 #include <cstring>
+#include <cstddef>
 #include <algorithm>
 #include <cassert>
 #include "classfile.hpp"
@@ -779,4 +780,20 @@ JNIHook_Shutdown()
         g_jnihook = nullptr;
 
         return JNIHOOK_OK;
+}
+
+JNIHOOK_API size_t JNIHOOK_CALL
+JNIHook_HookedMethodCount()
+{
+        size_t total = 0;
+        for (auto &entry : g_hooks) {
+                total += entry.second.size();
+        }
+        return total;
+}
+
+JNIHOOK_API size_t JNIHOOK_CALL
+JNIHook_CachedClassCount()
+{
+        return g_class_file_cache.size();
 }
