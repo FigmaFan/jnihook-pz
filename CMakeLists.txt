@@ -37,7 +37,7 @@ if(JNIHOOK_BUILD_TESTS)
     file(COPY "${PROJECT_SOURCE_DIR}/tests/dummy" DESTINATION .)
     set(DUMMY_DIR "${CMAKE_CURRENT_BINARY_DIR}/dummy")
 
-    # Java-Klassen kompilieren
+    # Java-Klassen kompilieren (alle .java im Dummy-Ordner)
     file(GLOB TESTS_JAVA_SRC "${DUMMY_DIR}/*.java")
     if(TESTS_JAVA_SRC)
         execute_process(
@@ -52,7 +52,7 @@ if(JNIHOOK_BUILD_TESTS)
     target_link_libraries(hooktest PRIVATE jnihook)
     set_target_properties(hooktest PROPERTIES POSITION_INDEPENDENT_CODE True)
 
-    # Java-basierter Testlauf (separater Testname, kein Konflikt mit GTest)
+    # Java-basierter Testlauf
     add_test(
         NAME jnihook_java_tests
         COMMAND "${JAVA_HOME}/bin/java${CMAKE_EXECUTABLE_SUFFIX}"
@@ -60,6 +60,11 @@ if(JNIHOOK_BUILD_TESTS)
                 "-cp" "${DUMMY_DIR}"
                 "dummy.HookTests"
     )
+
+    # -------- Shutdown-Test (C++ Executable) --------
+    add_executable(shutdown_test "${TESTS_DIR}/shutdown_test.cpp")
+    target_link_libraries(shutdown_test PRIVATE jnihook)
+    add_test(NAME shutdown_test COMMAND shutdown_test)
 
     # -------- GoogleTest-Unit-Tests --------
     include(FetchContent)

@@ -25,6 +25,7 @@
 
 #include <jni.h>
 #include <jvmti.h>
+#include <stddef.h>
 
 #define JNIHOOK_API
 #define JNIHOOK_CALL
@@ -84,6 +85,20 @@ JNIHook_Detach(jmethodID method);
  */
 JNIHOOK_API jnihook_result_t JNIHOOK_CALL
 JNIHook_Shutdown();
+
+/**
+ * Returns the number of methods currently hooked.
+ * Intended for testing and debugging purposes.
+ */
+JNIHOOK_API size_t JNIHOOK_CALL
+JNIHook_HookedMethodCount();
+
+/**
+ * Returns the number of cached classes held by JNIHook.
+ * Intended for testing and debugging purposes.
+ */
+JNIHOOK_API size_t JNIHOOK_CALL
+JNIHook_CachedClassCount();
 
 #ifdef __cplusplus
 }
