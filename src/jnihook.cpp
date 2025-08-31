@@ -308,6 +308,16 @@ JNIHook_Attach(jmethodID method, void *native_hook_method, jmethodID *original_m
                 return JNIHOOK_ERR_JVMTI_OPERATION;
         }
 
+        // Avoid hooking the same method twice
+        if (g_hooks.find(clazz_name) != g_hooks.end()) {
+                for (auto &existing : g_hooks[clazz_name]) {
+                        if (existing.method_info.name == method_info->name &&
+                            existing.method_info.signature == method_info->signature) {
+                                return JNIHOOK_ERR_ALREADY_HOOKED;
+                        }
+                }
+        }
+
         hook_info.method_info = *method_info;
         hook_info.native_hook_method = native_hook_method;
 

@@ -31,25 +31,37 @@ target_link_directories(jnihook PUBLIC
 target_link_libraries(jnihook PUBLIC jvm)
 
 if(JNIHOOK_BUILD_TESTS)
-    # --- Java/Dummy-Injection-Tests ---
+    enable_testing()
+
+    # -------- Java/Dummy-Integrationstests --------
     file(COPY "${PROJECT_SOURCE_DIR}/tests/dummy" DESTINATION .)
-    file(GLOB TESTS_JAVA_SRC "${CMAKE_CURRENT_BINARY_DIR}/dummy/*.java")
-    # Kompiliere die Dummy-Java-Klassen (configure-time).
+    set(DUMMY_DIR "${CMAKE_CURRENT_BINARY_DIR}/dummy")
+
+    # Java-Klassen kompilieren
+    file(GLOB TESTS_JAVA_SRC "${DUMMY_DIR}/*.java")
     if(TESTS_JAVA_SRC)
         execute_process(
             COMMAND "${JAVA_HOME}/bin/javac${CMAKE_EXECUTABLE_SUFFIX}" ${TESTS_JAVA_SRC}
-            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/dummy"
+            WORKING_DIRECTORY "${DUMMY_DIR}"
         )
     endif()
 
-    # Build zu injizierende Shared Library
+    # Native Testbibliothek (wird per System.loadLibrary geladen)
     set(TESTS_DIR "${PROJECT_SOURCE_DIR}/tests")
-    set(TESTS_SRC "${TESTS_DIR}/test.cpp")
-    add_library(test SHARED ${TESTS_SRC})
-    target_link_libraries(test PRIVATE jnihook)
-    set_target_properties(test PROPERTIES POSITION_INDEPENDENT_CODE True)
+    add_library(hooktest SHARED "${TESTS_DIR}/test.cpp")
+    target_link_libraries(hooktest PRIVATE jnihook)
+    set_target_properties(hooktest PROPERTIES POSITION_INDEPENDENT_CODE True)
 
-    # --- GoogleTest-Unit-Tests ---
+    # Java-basierter Testlauf (separater Testname, kein Konflikt mit GTest)
+    add_test(
+        NAME jnihook_java_tests
+        COMMAND "${JAVA_HOME}/bin/java${CMAKE_EXECUTABLE_SUFFIX}"
+                "-Djava.library.path=${CMAKE_BINARY_DIR}"
+                "-cp" "${DUMMY_DIR}"
+                "dummy.HookTests"
+    )
+
+    # -------- GoogleTest-Unit-Tests --------
     include(FetchContent)
     FetchContent_Declare(
         googletest
@@ -57,10 +69,9 @@ if(JNIHOOK_BUILD_TESTS)
     )
     FetchContent_MakeAvailable(googletest)
 
-    enable_testing()
-    add_executable(jnihook_tests
+    add_executable(jnihook_gtest
         tests/jnihook_init_test.cpp
     )
-    target_link_libraries(jnihook_tests PRIVATE jnihook gtest_main)
-    add_test(NAME jnihook_tests COMMAND jnihook_tests)
+    target_link_libraries(jnihook_gtest PRIVATE jnihook gtest_main)
+    add_test(NAME jnihook_gtest COMMAND jnihook_gtest)
 endif()
