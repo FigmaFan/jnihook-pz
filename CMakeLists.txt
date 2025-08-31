@@ -26,14 +26,18 @@ target_link_directories(jnihook PUBLIC "${JAVA_HOME}/lib" "${JAVA_HOME}/lib/serv
 target_link_libraries(jnihook PUBLIC jvm)
 
 if(JNIHOOK_BUILD_TESTS)
-	# Build Java classes
-	file(COPY "${PROJECT_SOURCE_DIR}/tests/dummy" DESTINATION .)
-	execute_process(COMMAND "${JAVA_HOME}/bin/javac${CMAKE_EXECUTABLE_SUFFIX}" "dummy/Dummy.java")
-	
-	# Build library to inject
-	set(TESTS_DIR "${PROJECT_SOURCE_DIR}/tests")
-	set(TESTS_SRC "${TESTS_DIR}/test.cpp")
-	add_library(test SHARED ${TESTS_SRC})
-	target_link_libraries(test PRIVATE jnihook)
-	set_target_properties(test PROPERTIES POSITION_INDEPENDENT_CODE True)
+        enable_testing()
+
+        # Build Java classes
+        file(COPY "${PROJECT_SOURCE_DIR}/tests/dummy" DESTINATION .)
+        execute_process(COMMAND "${JAVA_HOME}/bin/javac${CMAKE_EXECUTABLE_SUFFIX}" "dummy/Dummy.java" "dummy/HookTests.java")
+
+        # Build native test library
+        set(TESTS_DIR "${PROJECT_SOURCE_DIR}/tests")
+        set(TESTS_SRC "${TESTS_DIR}/test.cpp")
+        add_library(hooktest SHARED ${TESTS_SRC})
+        target_link_libraries(hooktest PRIVATE jnihook)
+        set_target_properties(hooktest PROPERTIES POSITION_INDEPENDENT_CODE True)
+
+        add_test(NAME jnihook_tests COMMAND "${JAVA_HOME}/bin/java${CMAKE_EXECUTABLE_SUFFIX}" "-Djava.library.path=${CMAKE_BINARY_DIR}" "-cp" "${CMAKE_BINARY_DIR}" "dummy.HookTests")
 endif()
