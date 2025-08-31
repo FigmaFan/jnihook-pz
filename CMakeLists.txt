@@ -26,14 +26,16 @@ target_link_directories(jnihook PUBLIC "${JAVA_HOME}/lib" "${JAVA_HOME}/lib/serv
 target_link_libraries(jnihook PUBLIC jvm)
 
 if(JNIHOOK_BUILD_TESTS)
-	# Build Java classes
-	file(COPY "${PROJECT_SOURCE_DIR}/tests/dummy" DESTINATION .)
-	execute_process(COMMAND "${JAVA_HOME}/bin/javac${CMAKE_EXECUTABLE_SUFFIX}" "dummy/Dummy.java")
-	
-	# Build library to inject
-	set(TESTS_DIR "${PROJECT_SOURCE_DIR}/tests")
-	set(TESTS_SRC "${TESTS_DIR}/test.cpp")
-	add_library(test SHARED ${TESTS_SRC})
-	target_link_libraries(test PRIVATE jnihook)
-	set_target_properties(test PROPERTIES POSITION_INDEPENDENT_CODE True)
+        include(FetchContent)
+        FetchContent_Declare(
+                googletest
+                URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
+        )
+        FetchContent_MakeAvailable(googletest)
+
+        enable_testing()
+        add_executable(jnihook_tests
+                tests/jnihook_init_test.cpp)
+        target_link_libraries(jnihook_tests PRIVATE jnihook gtest_main)
+        add_test(NAME jnihook_tests COMMAND jnihook_tests)
 endif()
